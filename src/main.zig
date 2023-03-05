@@ -1,17 +1,25 @@
 const rl = @import("raylib");
+const game = @import("game.zig");
 
-pub fn main() void {
+pub fn main() !void {
     rl.InitWindow(800, 450, "Axelisation");
+    rl.SetWindowState(@enumToInt(rl.ConfigFlags.FLAG_WINDOW_RESIZABLE));
     rl.SetTargetFPS(60);
     defer rl.CloseWindow();
+
+    var model = game.Model{};
 
     while (!rl.WindowShouldClose()) {
         rl.BeginDrawing();
         defer rl.EndDrawing();
 
-        rl.ClearBackground(rl.BLACK);
-        rl.DrawFPS(10, 10);
+        const input_actions = game.input();
+        defer input_actions.deinit();
 
-        rl.DrawText("Hello, world!", 100, 100, 20, rl.YELLOW);
+        model = game.update(model, input_actions);
+
+        try game.view(model);
+
+        rl.DrawFPS(10, 10);
     }
 }
