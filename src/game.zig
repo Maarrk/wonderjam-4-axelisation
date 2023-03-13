@@ -7,6 +7,7 @@ const allocator = gpa.allocator();
 const Vector2 = rl.Vector2;
 const Axis = rl.GamepadAxis;
 const Key = rl.KeyboardKey;
+const Button = rl.GamepadButton;
 
 const Config = struct {
     player_size: Vector2 = Vector2.one(),
@@ -36,9 +37,13 @@ const EnvItem = struct {
 
 const InputTrigger = enum {
     none,
-    press,
     hold,
     release,
+    press,
+
+    fn orInput(self: InputTrigger, other: InputTrigger) InputTrigger {
+        return @intToEnum(InputTrigger, std.math.max(@enumToInt(self), @enumToInt(other)));
+    }
 };
 
 pub const InputActions = struct {
@@ -76,8 +81,8 @@ pub fn input() InputActions {
     actions.move.y = rl.Clamp(actions.move.y, -1.0, 1.0);
 
     // Button presses
-    actions.jump = keyState(Key.KEY_SPACE);
-    actions.sprint = keyState(Key.KEY_LEFT_SHIFT);
+    actions.jump = keyState(Key.KEY_SPACE).orInput(buttonState(Button.GAMEPAD_BUTTON_RIGHT_FACE_DOWN));
+    actions.sprint = keyState(Key.KEY_LEFT_SHIFT).orInput(buttonState(Button.GAMEPAD_BUTTON_LEFT_TRIGGER_1));
 
     return actions;
 }
@@ -86,6 +91,15 @@ fn keyState(key: Key) InputTrigger {
     if (rl.IsKeyPressed(key)) return InputTrigger.press;
     if (rl.IsKeyReleased(key)) return InputTrigger.release;
     if (rl.IsKeyDown(key)) return InputTrigger.hold;
+    return InputTrigger.none;
+}
+
+fn buttonState(button: Button) InputTrigger {
+    if (rl.IsGamepadAvailable(0)) {
+        if (rl.IsGamepadButtonPressed(0, button)) return InputTrigger.press;
+        if (rl.IsGamepadButtonReleased(0, button)) return InputTrigger.release;
+        if (rl.IsGamepadButtonDown(0, button)) return InputTrigger.press;
+    }
     return InputTrigger.none;
 }
 
@@ -101,21 +115,21 @@ pub fn update(model: Model, input_actions: InputActions, delta_time: f64) Model 
             ei.rect.y <= p.y and
             ei.rect.y <= p.y + m.player_velocity.y * dt)
         {
-            m.player_velocity.y = 0;
             m.player_position.y = ei.rect.y;
             break true;
         }
     } else false;
 
     {
-        var v = m.player_velocity;
-        defer m.player_velocity = v;
+        var v = &m.player_velocity;
         const move = input_actions.move;
 
         if (is_grounded) {
             v.x = config.player_max_velocity * move.x;
             if (input_actions.jump == InputTrigger.press) {
                 v.y = -config.player_jump_velocity;
+            } else {
+                m.player_velocity.y = 0;
             }
         } else {
             const move_dv = config.player_max_velocity * dt;
@@ -129,11 +143,14 @@ pub fn update(model: Model, input_actions: InputActions, delta_time: f64) Model 
                 if (move.x < 0) v.x -= dash_v;
             }
 
-            const friction_dv = config.player_air_friction * dt;
-            if (@fabs(v.x) <= friction_dv) {
-                v.x = 0.0;
-            } else {
-                v.x -= if (v.x > 0) friction_dv else -friction_dv;
+            if (!(@fabs(move.x) >= 0.95 and v.x * move.x > 0)) {
+                // Keep current velocity if maximal input in direction of travel
+                const friction_dv = config.player_air_friction * dt;
+                if (@fabs(v.x) <= friction_dv) {
+                    v.x = 0.0;
+                } else {
+                    v.x -= if (v.x > 0) friction_dv else -friction_dv;
+                }
             }
 
             v.y += config.gravity * dt;
